@@ -1,0 +1,111 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local UserInputService = game:GetService("UserInputService")
+local LocalPlayer = Players.LocalPlayer
+local Mouse = LocalPlayer:GetMouse()
+
+local onCooldown = false
+local isEnabled = true
+local scriptConnection = nil
+local enemyPlayers = {}
+
+local function performClick()
+	if onCooldown then return end
+	onCooldown = true
+	
+	if type(mouse1press) == "function" then
+		mouse1press()
+		task.wait(0.05)
+		mouse1release()
+	else
+		local x = Mouse.X
+		local y = Mouse.Y
+		VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 1)
+		task.wait(0.05)
+		VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 1)
+	end
+	
+	task.wait(0.1) 
+	onCooldown = false
+end
+
+-- Strictly filters for Entrenched's live deployment system
+local function getActiveTeam(player)
+	-- 1. If they have no character in the workspace, they are in the menu. Ignore them.
+	if not player.Character then return nil end
+	
+	-- 2. If they are dead, ignore them.
+	local humanoid = player.Character:FindFirstChild("Humanoid")
+	if not humanoid or humanoid.Health <= 0 then return nil end
+	
+	-- 3. In Entrenched, your active team name (e.g., "France", "German Empire") is your true country
+	if player.Team then
+		local teamName = player.Team.Name
+		-- Ignore players in neutral/lobby states
+		if teamName ~= "Menu" and teamName ~= "Choosing..." and teamName ~= "Deploying" then
+			return teamName
+		end
+	end
+	
+	return nil
+end
+
+task.spawn(function()
+	while task.wait(3) do
+		if not isEnabled then continue end
+		
+		local newEnemies = {}
+		local myTeam = getActiveTeam(LocalPlayer)
+		
+		-- Only build the enemy list if YOU are actively deployed and alive
+		if myTeam then
+			for _, player in pairs(Players:GetPlayers()) do
+				if player ~= LocalPlayer then
+					local theirTeam = getActiveTeam(player)
+					
+					-- If they are alive, deployed, and on a different team, they are an enemy
+					if theirTeam and theirTeam ~= myTeam then
+						newEnemies[player.UserId] = true
+					end
+				end
+			end
+		end
+		
+		enemyPlayers = newEnemies
+	end
+end)
+
+scriptConnection = RunService.RenderStepped:Connect(function()
+	if not isEnabled then return end 
+	
+	local target = Mouse.Target
+	
+	if target then
+		local character = target:FindFirstAncestorOfClass("Model")
+		if character and character:FindFirstChild("Humanoid") then
+			local player = Players:GetPlayerFromCharacter(character)
+			
+			if player and enemyPlayers[player.UserId] then
+				-- Final safety check: Make sure the target is actually alive before shooting
+				if character.Humanoid.Health > 0 then
+					performClick()
+				end
+			end
+		end
+	end
+end)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed then return end 
+	
+	if input.KeyCode == Enum.KeyCode.T then
+		isEnabled = not isEnabled
+	elseif input.KeyCode == Enum.KeyCode.K then
+		if scriptConnection then
+			scriptConnection:Disconnect()
+			scriptConnection = nil
+		end
+		isEnabled = false
+	end
+end)
